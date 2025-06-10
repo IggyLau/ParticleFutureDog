@@ -198,21 +198,36 @@ def parse_llm_goal_output(content, allowed_actions, allowed_emotions, max_goals=
 # 6. Test Scenarios
 # -----------------
 def main():
-    
-    import json
-    import time
-    
-    # 1. Initialize DogPersonality
+    # Initialize DogPersonality
     dog = DogPersonality()
     print("Initial personality:", dog.get_personality())
     print("Initial emotion vector:", dog.get_emotion_vector())
-
-    # 2. Simulate user input (e.g., user pets the dog)
-    user_input_1 = {"event": "walks into the room", "intensity": 0.3}
-    newInput(dog, user_input_1)
-    get_sequence()
-
     
+    print("\nDog Companion Interactive Mode")
+    print("Type 'quit' to exit")
+    
+    while True:
+        # Get event input
+        event = input("\nEnter event (e.g., stand, sit, bark): ").strip().lower()
+        if event == 'quit':
+            print("Goodbye!")
+            break
+            
+        # Get intensity input
+        while True:
+            try:
+                intensity = float(input("Enter intensity (0.0 to 1.0): ").strip())
+                if 0.0 <= intensity <= 1.0:
+                    break
+                print("Please enter a number between 0.0 and 1.0")
+            except ValueError:
+                print("Please enter a valid number")
+        
+        # Create user input and process it
+        user_input = {"event": event, "intensity": intensity}
+        print(f"\nProcessing: {user_input}")
+        newInput(dog, user_input)
+        get_sequence()
 
 if __name__ == "__main__":
     main() 
