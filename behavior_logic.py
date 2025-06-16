@@ -32,6 +32,9 @@ from collections import deque
 from collections import deque
 
 def shortest_action_path(dog, start_action, end_action, emotionAction):
+    print("This is the start action for SAP "+str(start_action))
+    print("This is the end action "+str(end_action))
+   
     if start_action == dog.get_action():
         dog.blend_emotions(emotionAction)
         return [(start_action, dog.get_emotion_vector())]
@@ -58,23 +61,28 @@ def shortest_action_path(dog, start_action, end_action, emotionAction):
                 queue.append((next_action, path_so_far + [(next_action, current_emotions)]))
     return None
 
+# New function to directly blend emotions for an action
+def direct_emotion_blend(dog, action, emotions):
+    dog.blend_emotions(emotions)
+    return (action, dog.get_emotion_vector())
+
+
+# Updated buildSequence function to use direct_emotion_blend
 def buildSequence(dog, valid_goals):
     fullSequence = []
     if len(valid_goals) < 2:
         print("Single goal detected")
         action, emotions = valid_goals[0]
-        # Use the dog instance
-        dog.blend_emotions(emotions)
-        fullSequence.append((action, dog.get_emotion_vector()))
-        
+        # Use direct_emotion_blend instead of shortest_action_path
+        fullSequence.append(direct_emotion_blend(dog, action, emotions))
         return fullSequence
         
-    for i in range(len(valid_goals)-1):
-        
-        path = shortest_action_path(dog, valid_goals[i][0], valid_goals[i+1][0], valid_goals[i][1])
-        if path:
-            fullSequence.extend(path)
-    print ("This is the length"+str(len(fullSequence)))
+    # Process all goals, including the last one
+    for goal in valid_goals:
+        print("Processing goal:", goal)
+        action, emotions = goal
+        fullSequence.append(direct_emotion_blend(dog, action, emotions))
+    print("This is the length of the full sequence" + str(len(fullSequence)))
     return fullSequence
     
 
@@ -87,14 +95,9 @@ def get_llm_goals(dog_personality):
     emotion = dog_personality.get_emotion_vector()
    
 
-    # Summarize the last 3 user inputs for the LLM prompt
-    recent_inputs = dog_personality.get_user_inputs()[-3:]
-    if recent_inputs:
-        user_input_str = "Recent user interactions:\n" + "\n".join(
-            f"- {ui['event']} (intensity: {ui.get('intensity', 'n/a')})" for ui in recent_inputs
-        )
-    else:
-        user_input_str = "No recent user interactions."
+    # Get the last user input 
+    recent_inputs = dog_personality.get_user_inputs()[-1:]
+    
 
     prompt = f"""
 You are a dog with the following personality: {personality}
@@ -105,7 +108,7 @@ You are a dog with the following personality: {personality}
 
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": userPrompt}
