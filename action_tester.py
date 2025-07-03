@@ -36,6 +36,7 @@ class ActionTester:
         print("7. Show available actions")
         print("8. Show available emotions")
         print("9. Add preset sequences")
+        print("10. Get Finger Sequence History from server")
         print("0. Quit")
         print("="*50)
         
@@ -236,6 +237,26 @@ class ActionTester:
             except ValueError:
                 print("Invalid input. Please enter a number.")
                 
+    def get_finger_sequence_from_server(self):
+        """
+        Fetch and display the finger sequence history from /get_Fingersequence endpoint.
+        """
+        try:
+            response = requests.get(f"{self.server_url}/get_Fingersequence")
+            if response.status_code == 200:
+                data = response.json()
+                history = data.get("history", [])
+                if history:
+                    print(f"\nFinger Sequence History ({len(history)} entries):")
+                    for i, entry in enumerate(history, 1):
+                        print(f"{i:2d}. {entry}")
+                else:
+                    print("\nNo finger sequence history on server.")
+            else:
+                print(f"\n✗ Failed to get finger sequence history. Status code: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"\n✗ Error connecting to server: {e}")
+        
     def run(self):
         print("Starting Action & Emotion Vector Tester...")
         print("Make sure the server is running: python action_server.py")
@@ -262,6 +283,8 @@ class ActionTester:
                 self.show_available_emotions()
             elif choice == "9":
                 self.add_preset_sequences()
+            elif choice == "10":
+                self.get_finger_sequence_from_server()
             elif choice == "0":
                 print("\nGoodbye!")
                 break

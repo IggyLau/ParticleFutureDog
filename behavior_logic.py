@@ -4,6 +4,7 @@ Dog Companion Behavior Sequencing System
 - Modular, extensible system for sequencing dog actions and emotions.
 - Receives high-level goals, outputs valid action sequences for animation.
 - Handles interrupts (e.g., user input) and replans as needed.
+- Polls finger sequence server for user inputs and generates dog responses.
 
 Sections:
 1. Data Structures (actions, transitions, emotions)
@@ -11,11 +12,15 @@ Sections:
 3. Sequence Producer
 4. LLM/AI Goal Stub
 5. System Loop & Interrupt Handling
-6. Test Scenarios
+6. Finger Sequence Polling
+7. Test Scenarios
 """
 
 import os
 import openai
+import requests
+import time
+import json
 from dog_personality import DogPersonality
 from config import core_sentiments, action_transitions, rules, allowed_actions
 
@@ -104,7 +109,7 @@ You are a dog with the following personality: {personality}
 
 {rules}
 """
-    userPrompt= f""" I am doing this currently {recent_inputs}"""
+    userPrompt= f""" I am doing this currently {recent_inputs} I need you to react in an excited and very unique manner utilizing different commands and possibilities DO NOT JUST USE SIT AND WALK OR ELSE I WILL BEAT YOU"""
 
     try:
         response = client.chat.completions.create(
@@ -198,39 +203,160 @@ def parse_llm_goal_output(content, allowed_actions, allowed_emotions, max_goals=
     return valid_goals
 
 
-# 6. Test Scenarios
+# 6. Finger Sequence Polling
+# --------------------------
+def get_finger_sequence():
+    """Poll the finger sequence server for user input history"""
+    try:
+        response = requests.get("http://127.0.0.1:50007/get_Fingersequence", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            # Handle the new structure with "history" key
+            if "history" in data:
+                return data
+            else:
+                # Fallback to old structure
+                return data.get("sequence", [])
+        else:
+            print(f"Failed to get finger sequence. Status code: {response.status_code}")
+            return {}
+    except requests.exceptions.RequestException as e:
+        print(f"Error connecting to finger sequence server: {e}")
+        return {}
+
+def parse_finger_sequence_to_user_input(finger_sequence):
+    """Convert finger sequence data into meaningful user input for the LLM"""
+    if not finger_sequence:
+        return "No user activity detected"
+    
+    # Handle the new JSON structure with "history" key
+    if isinstance(finger_sequence, dict) and "history" in finger_sequence:
+        finger_sequence = finger_sequence["history"]
+    
+    # Extract the most recent actions (last 5 for better context)
+    recent_actions = finger_sequence[-5:] if len(finger_sequence) >= 5 else finger_sequence
+    
+    # Analyze the recent actions for patterns
+    keypoints = [action.get('keypoint', 'unknown') for action in recent_actions]
+    point_history = [action.get('point_history', 'unknown') for action in recent_actions]
+    emotions = [action.get('emotion', 'neutral') for action in recent_actions]
+    emotion_strengths = [action.get('emotion_strength', 0) for action in recent_actions]
+    
+    # Get the most common patterns
+    most_common_keypoint = max(set(keypoints), key=keypoints.count) if keypoints else "unknown"
+    most_common_direction = max(set(point_history), key=point_history.count) if point_history else "unknown"
+    
+    # Calculate average emotion strength
+    avg_emotion_strength = sum(emotion_strengths) / len(emotion_strengths) if emotion_strengths else 0
+    
+    # Create descriptive user input
+    user_input = f"User hand gesture: {most_common_keypoint} keypoint, moving {most_common_direction}, "
+    user_input += f"average emotion strength: {avg_emotion_strength:.1f}, "
+    user_input += f"recent actions: {', '.join([f'{k}->{p}' for k, p in zip(keypoints[-3:], point_history[-3:])])}"
+    
+    return user_input
+
+def poll_and_respond(dog, poll_interval=2.0):
+    """Main polling loop that continuously monitors user inputs and generates dog responses"""
+    print(f"Starting dog behavior polling system...")
+    print(f"Polling finger sequence server every {poll_interval} seconds")
+    print(f"Press Ctrl+C to stop")
+    
+    last_processed_sequence = None
+    
+    try:
+        while True:
+            # Get current finger sequence
+            current_finger_sequence = get_finger_sequence()
+            
+            # Check if we have new data to process
+            if current_finger_sequence and current_finger_sequence != last_processed_sequence:
+                print(f"\n--- New user activity detected ---")
+                print(f"Finger sequence: {current_finger_sequence}")
+                
+                # Parse finger sequence to user input
+                user_input = parse_finger_sequence_to_user_input(current_finger_sequence)
+                print(f"Parsed user input: {user_input}")
+                
+                # Process through behavior logic
+                try:
+                    dog_response = newInput(dog, user_input)
+                    print(f"Generated dog response: {dog_response}")
+                except Exception as e:
+                    print(f"Error generating dog response: {e}")
+                
+                # Update last processed sequence
+                last_processed_sequence = current_finger_sequence.copy()
+            
+            # Wait before next poll
+            time.sleep(poll_interval)
+            
+    except KeyboardInterrupt:
+        print("\nStopping dog behavior polling system...")
+
+def start_polling_system(poll_interval=2.0):
+    """Start the autonomous dog behavior polling system"""
+    dog = DogPersonality()
+    poll_and_respond(dog, poll_interval)
+
+# 7. Test Scenarios
 # -----------------
 def main():
-    # Initialize DogPersonality
-    dog = DogPersonality()
-    print("Initial personality:", dog.get_personality())
-    print("Initial emotion vector:", dog.get_emotion_vector())
-    
-    print("\nDog Companion Interactive Mode")
-    print("Type 'quit' to exit")
+    print("Dog Companion Behavior System")
+    print("=" * 40)
+    print("1. Interactive Mode (manual input)")
+    print("2. Polling Mode (autonomous from finger sequence server)")
+    print("3. Exit")
     
     while True:
-        # Get event input
-        event = input("\nEnter event (e.g., stand, sit, bark): ").strip().lower()
-        if event == 'quit':
+        choice = input("\nSelect mode (1-3): ").strip()
+        
+        if choice == "1":
+            # Interactive Mode
+            dog = DogPersonality()
+            print("Initial personality:", dog.get_personality())
+            print("Initial emotion vector:", dog.get_emotion_vector())
+            
+            print("\nDog Companion Interactive Mode")
+            print("Type 'quit' to exit")
+            
+            while True:
+                # Get event input
+                event = input("\nEnter event (e.g., stand, sit, bark): ").strip().lower()
+                if event == 'quit':
+                    break
+                    
+                # Get intensity input
+                while True:
+                    try:
+                        intensity = float(input("Enter intensity (0.0 to 1.0): ").strip())
+                        if 0.0 <= intensity <= 1.0:
+                            break
+                        print("Please enter a number between 0.0 and 1.0")
+                    except ValueError:
+                        print("Please enter a valid number")
+                
+                # Create user input and process it
+                user_input = {"event": event, "intensity": intensity}
+                print(f"\nProcessing: {user_input}")
+                newInput(dog, user_input)
+                get_sequence()
+        
+        elif choice == "2":
+            # Polling Mode
+            try:
+                poll_interval = float(input("Enter polling interval in seconds (default 2.0): ").strip() or "2.0")
+                start_polling_system(poll_interval)
+            except ValueError:
+                print("Invalid interval, using default 2.0 seconds")
+                start_polling_system(2.0)
+        
+        elif choice == "3":
             print("Goodbye!")
             break
-            
-        # Get intensity input
-        while True:
-            try:
-                intensity = float(input("Enter intensity (0.0 to 1.0): ").strip())
-                if 0.0 <= intensity <= 1.0:
-                    break
-                print("Please enter a number between 0.0 and 1.0")
-            except ValueError:
-                print("Please enter a valid number")
         
-        # Create user input and process it
-        user_input = {"event": event, "intensity": intensity}
-        print(f"\nProcessing: {user_input}")
-        newInput(dog, user_input)
-        get_sequence()
+        else:
+            print("Invalid choice. Please select 1, 2, or 3.")
 
 if __name__ == "__main__":
     main() 
