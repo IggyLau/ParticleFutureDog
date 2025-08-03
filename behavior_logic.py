@@ -92,9 +92,11 @@ def buildSequence(dog, valid_goals):
     
 
 def get_llm_goals(dog_personality):    
-    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY environment variable not set.")
+
+    # Initialize the OpenAI client with the new API
+    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     personality = dog_personality.get_personality()
     emotion = dog_personality.get_emotion_vector()
@@ -113,7 +115,7 @@ You are a dog with the following personality: {personality}
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": userPrompt}
@@ -126,6 +128,55 @@ You are a dog with the following personality: {personality}
     except Exception as e:
         raise RuntimeError(f"Failed to get valid LLM goals: {e}")
 
+def get_llm_goals_from_text(dog_personality, user_text):    
+    """
+    Generate dog actions based on written text input instead of finger sequences.
+    """
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY environment variable not set.")
+
+    # Initialize the OpenAI client with the new API
+    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    personality = dog_personality.get_personality()
+    emotion = dog_personality.get_emotion_vector()
+    
+    # Get the last few user inputs for context
+    recent_inputs = dog_personality.get_user_inputs()[-3:]
+    
+    prompt = f"""
+You are a dog with the following personality: {personality}
+
+{rules}
+"""
+    
+    userPrompt = f"""The human said to me: "{user_text}"
+
+Recent conversation context: {recent_inputs}
+
+I need to react as a dog would to this human communication. Consider:
+- The tone and emotion in their words
+- What they might want me to do
+- How I should respond based on my personality
+- Whether they're being friendly, commanding, playful, or emotional
+
+React in an authentic dog-like manner with varied and creative actions!"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": userPrompt}
+                ],
+            max_tokens=512,
+            temperature=0.7,
+        )
+        content = response.choices[0].message.content.strip()
+        return parse_llm_goal_output(content, allowed_actions, core_sentiments)
+    except Exception as e:
+        raise RuntimeError(f"Failed to get valid LLM goals from text: {e}")
+
 # 5. System Loop & Interrupt Handling
 # -----------------------------------
 def newInput(dog, user_input):
@@ -137,6 +188,42 @@ def newInput(dog, user_input):
     print("JsonSequence:", json_ready_sequence)
     upload_sequence(json_ready_sequence)
     return json_ready_sequence
+
+def newInput_from_text(dog, user_text, auto_upload=True):
+    """
+    Process written text input and generate dog response sequence.
+    """
+    print(f"\n🐕 Processing text input: '{user_text}'")
+    
+    # Add the text input to dog's history
+    dog.add_user_input(user_text)
+    
+    try:
+        # Get LLM goals based on text input
+        valid_goals = get_llm_goals_from_text(dog, user_text)
+        print(f"📋 Generated {len(valid_goals)} goals: {[goal[0] for goal in valid_goals]}")
+        
+        # Build the action sequence
+        fullSequence = buildSequence(dog, valid_goals)
+        
+        # Convert to JSON format
+        json_ready_sequence = [{"action": act, "emotions": emos} for (act, emos) in fullSequence]
+        print("🎭 Action sequence with emotions:")
+        for i, entry in enumerate(json_ready_sequence, 1):
+            action = entry["action"]
+            top_emotions = sorted(entry["emotions"].items(), key=lambda x: x[1], reverse=True)[:3]
+            emotion_str = ", ".join([f"{e}:{w:.2f}" for e, w in top_emotions])
+            print(f"   {i}. {action} ({emotion_str})")
+        
+        if auto_upload:
+            upload_sequence(json_ready_sequence)
+            print("✅ Uploaded sequence to server!")
+            
+        return json_ready_sequence
+        
+    except Exception as e:
+        print(f"❌ Error processing text input: {e}")
+        return None
 
 import requests
 
@@ -304,15 +391,16 @@ def start_polling_system(poll_interval=2.0):
 def main():
     print("Dog Companion Behavior System")
     print("=" * 40)
-    print("1. Interactive Mode (manual input)")
-    print("2. Polling Mode (autonomous from finger sequence server)")
-    print("3. Exit")
+    print("1. Interactive Mode (manual event/intensity input)")
+    print("2. Text Input Mode (natural language)")
+    print("3. Polling Mode (autonomous from finger sequence server)")
+    print("4. Exit")
     
     while True:
-        choice = input("\nSelect mode (1-3): ").strip()
+        choice = input("\nSelect mode (1-4): ").strip()
         
         if choice == "1":
-            # Interactive Mode
+            # Interactive Mode (original)
             dog = DogPersonality()
             print("Initial personality:", dog.get_personality())
             print("Initial emotion vector:", dog.get_emotion_vector())
@@ -343,6 +431,44 @@ def main():
                 get_sequence()
         
         elif choice == "2":
+            # Text Input Mode (NEW)
+            dog = DogPersonality()
+            print("🐕 Dog Companion Text Input Mode")
+            print("=" * 40)
+            print("Talk to your dog companion using natural language!")
+            print("Examples:")
+            print("  • 'Good boy! Come here!'")
+            print("  • 'I'm feeling sad today'")
+            print("  • 'Want to play fetch?'")
+            print("  • 'Time for dinner!'")
+            print("  • 'Bad dog! No!'")
+            print("\nType 'quit' to exit")
+            print("=" * 40)
+            
+            print(f"\n🐕 Your dog's personality: {dog.get_personality()}")
+            
+            while True:
+                # Get text input from user
+                user_text = input("\n💬 Say something to your dog: ").strip()
+                
+                if user_text.lower() == 'quit':
+                    print("🐕 *wags tail goodbye*")
+                    break
+                
+                if not user_text:
+                    print("Please enter some text for your dog to respond to!")
+                    continue
+                
+                # Process the text input
+                result = newInput_from_text(dog, user_text)
+                
+                if result:
+                    print(f"\n📊 Dog's current emotion state:")
+                    top_emotions = dog.get_top_emotions(3)
+                    for emotion, weight in top_emotions:
+                        print(f"   {emotion}: {weight:.2f}")
+        
+        elif choice == "3":
             # Polling Mode
             try:
                 poll_interval = float(input("Enter polling interval in seconds (default 2.0): ").strip() or "2.0")
@@ -351,12 +477,12 @@ def main():
                 print("Invalid interval, using default 2.0 seconds")
                 start_polling_system(2.0)
         
-        elif choice == "3":
+        elif choice == "4":
             print("Goodbye!")
             break
         
         else:
-            print("Invalid choice. Please select 1, 2, or 3.")
+            print("Invalid choice. Please select 1, 2, 3, or 4.")
 
 if __name__ == "__main__":
     main() 
